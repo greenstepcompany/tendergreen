@@ -1,0 +1,69 @@
+name: 🌿 TenderGreen Monitor
+
+on:
+  schedule:
+    # Pokreće se svakih 3 sata (00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 UTC)
+    # Za Sarajevo (CET/CEST) to je +1/+2 sata
+    - cron: "0 */3 * * *"
+
+  # Omogućava ručno pokretanje iz GitHub interfejsa
+  workflow_dispatch:
+    inputs:
+      force_send:
+        description: "Pošalji email čak i bez novih tendera"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  provjeri-tendere:
+    name: Provjeri ejn.gov.ba
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Preuzmi kod
+        uses: actions/checkout@v4
+
+      - name: 🐍 Postavi Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 📦 Instaliraj pakete
+        run: pip install -r requirements.txt
+
+      - name: 📂 Vrati sačuvane podatke (seen_tenders)
+        uses: actions/cache@v4
+        with:
+          path: data/
+          key: tender-data-${{ runner.os }}
+          restore-keys: |
+            tender-data-
+
+      - name: 🌿 Pokretanje TenderGreen skripte
+        env:
+          EMAIL_POSILJALAC: ${{ secrets.EMAIL_POSILJALAC }}
+          EMAIL_LOZINKA: ${{ secrets.EMAIL_LOZINKA }}
+          EMAIL_PRIMALAC: ${{ secrets.EMAIL_PRIMALAC }}
+          NAZIV_FIRME: ${{ secrets.NAZIV_FIRME }}
+          MIN_RELEVANTNOST: ${{ vars.MIN_RELEVANTNOST || '30' }}
+          MIN_VRIJEDNOST_KM: ${{ vars.MIN_VRIJEDNOST_KM || '0' }}
+          SLJI_PRAZAN_IZVJESTAJ: ${{ github.event.inputs.force_send || 'false' }}
+        run: python main.py
+
+      - name: 💾 Sačuvaj podatke o viđenim tenderima
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data/
+          key: tender-data-${{ runner.os }}-${{ github.run_id }}
+
+      - name: 📊 Sačuvaj izvještaj kao artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: izvjestaj-${{ github.run_number }}
+          path: data/last_results.json
+          retention-days: 30

@@ -42,10 +42,17 @@ def main():
         ]
         print(f"   Filter vrijednosti ≥ {min_vrij} KM: {len(svi_tenderi)} tendera")
 
-    # Filtriraj samo nove
-    seen = load_seen()
+    # Opcija: prikaži sve aktivne tendere
+prikazi_sve = os.environ.get("PRIKAZI_SVE_AKTIVNE", "false").lower() == "true"
+
+seen = load_seen()
+
+if prikazi_sve:
+    novi = svi_tenderi
+    print(f"\n📋 Prikazujem SVE aktivne tendere: {len(novi)}")
+else:
     novi = filtriraj_nove(svi_tenderi, seen)
-    print(f"\n📋 Novih tendera (ranije neviđenih): {len(novi)}")
+    print(f"\n🆕 Novih tendera (ranije neviđenih): {len(novi)}")
 
     # Sačuvaj rezultate
     save_results(svi_tenderi)

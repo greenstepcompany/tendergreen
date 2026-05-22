@@ -81,6 +81,18 @@ MAX_CPV_LINKS = int(os.environ.get("MAX_CPV_LINKS", "80"))
 MAX_KEYWORD_RESULTS = int(os.environ.get("MAX_KEYWORD_RESULTS", "30"))
 MAX_ACTIVE_SCAN = int(os.environ.get("MAX_ACTIVE_SCAN", "200"))
 MAX_PROCEDURE_CALL_AGE_DAYS = int(os.environ.get("MAX_PROCEDURE_CALL_AGE_DAYS", "60"))
+SAMO_SARAJEVO = True
+SARAJEVO_LOKACIJE = [
+    "Sarajevo",
+    "Ilidža",
+    "Novi Grad",
+    "Novo Sarajevo",
+    "Centar",
+    "Vogošća",
+    "Hadžići",
+    "Ilijaš",
+    "Trnovo",
+]
 
 
 @dataclass
@@ -279,7 +291,16 @@ def prikupi_tendere(min_relevantnost=30):
 
     print(f"  → Ukupno unikatnih: {len(sirovi)}")
     tenderi = []
+    preskoceno_rok = 0
+    preskoceno_lokacija = 0
     for raw in sirovi.values():
+        if not _ima_buduci_rok(raw):
+            preskoceno_rok += 1
+            continue
+        if SAMO_SARAJEVO and not _u_sarajevu(raw):
+            preskoceno_lokacija += 1
+            continue
+
         score, razlozi = izracunaj_relevantnost(
             raw.get("naslov", ""),
             raw.get("cpv_kod", ""),
@@ -301,6 +322,10 @@ def prikupi_tendere(min_relevantnost=30):
             ))
 
     tenderi.sort(key=lambda x: x.relevantnost, reverse=True)
+    if preskoceno_rok:
+        print(f"  → Preskočeno bez budućeg roka: {preskoceno_rok}")
+    if SAMO_SARAJEVO and preskoceno_lokacija:
+        print(f"  → Preskočeno van Kantona Sarajevo: {preskoceno_lokacija}")
     print(f"✅ Relevantnih: {len(tenderi)}")
     return tenderi
 
@@ -417,16 +442,26 @@ def _mapiraj_odata_red(row, cpv_kod="", cpv_opis=""):
     )
     announced = row.get("Announced") or row.get("LastUpdated")
     value = row.get("EstimatedValue")
+    lokacija = _clean_text(" ".join([
+        str(row.get("Location") or ""),
+        str(row.get("ContractingAuthorityCityName") or ""),
+        str(row.get("ContractingAuthorityAdministrativeUnitName") or ""),
+        str(row.get("AdditionalInformationCityName") or ""),
+        str(row.get("OfferDeliveryCityName") or ""),
+        str(row.get("DocumentationTakeOverCityName") or ""),
+    ]))
 
     return {
         "id": tender_id,
         "naslov": naslov,
         "narucilac": _clean_text(row.get("ContractingAuthorityName") or "—"),
+        "lokacija": lokacija,
         "cpv_kod": cpv_kod or "",
         "cpv_opis": cpv_opis or "",
         "vrijednost": _format_money(value),
         "datum_objave": _format_date(announced),
         "rok_prijave": _format_date(deadline),
+        "rok_prijave_dt": deadline,
         "url": _announcement_url(row.get("Id")) if row.get("IsLatestVersion") is not None else _portal_url(procedure_id),
     }
 
@@ -456,17 +491,23 @@ def _aktivan_red(row):
         or _parse_datetime(row.get("ProcurementPhaseOfferSubmissionDeadline"))
         or _parse_datetime(row.get("IntermediatePhaseOfferSubmissionDeadline"))
     )
-    if deadline:
-        return deadline >= datetime.now(timezone.utc)
+    return bool(deadline and deadline > datetime.now(timezone.utc))
 
-    if row.get("IsLatestVersion") is not None:
-        announced = _parse_datetime(row.get("Announced"))
-        if not row.get("IsLatestVersion") or not announced:
-            return False
-        return announced >= datetime.now(timezone.utc) - timedelta(days=MAX_PROCEDURE_CALL_AGE_DAYS)
 
-    status = str(row.get("Status") or "").lower()
-    return status in {"announced", "active"}
+def _ima_buduci_rok(raw):
+    deadline = _parse_datetime(raw.get("rok_prijave_dt"))
+    if not deadline:
+        deadline = _parse_lokalni_datum(raw.get("rok_prijave"))
+    return bool(deadline and deadline > datetime.now(timezone.utc))
+
+
+def _u_sarajevu(raw):
+    tekst = normalizuj_tekst(" ".join([
+        raw.get("naslov", ""),
+        raw.get("narucilac", ""),
+        raw.get("lokacija", ""),
+    ]))
+    return any(normalizuj_tekst(lokacija) in tekst for lokacija in SARAJEVO_LOKACIJE)
 
 
 def _parse_datetime(value):
@@ -478,6 +519,20 @@ def _parse_datetime(value):
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _parse_lokalni_datum(value):
+    if not value or str(value).strip().lower() in {"—", "-", "nepoznat", "none"}:
+        return None
+    for fmt in ("%d.%m.%Y", "%d.%m.%Y.", "%Y-%m-%d", "%d.%m.%Y %H:%M"):
+        try:
+            parsed = datetime.strptime(str(value).strip("."), fmt)
+            if fmt in ("%d.%m.%Y", "%d.%m.%Y.", "%Y-%m-%d"):
+                parsed = parsed.replace(hour=23, minute=59, second=59)
+            return parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
 
 
 def _format_date(value):

@@ -149,8 +149,8 @@ def generiši_html(tenderi, naziv_firme="Green Step Company") -> str:
 </html>"""
 
 
-def pošalji_email(tenderi, novi_tenderi=None):
-    """Pošalji email notifikaciju."""
+def posalji_email(tenderi, novi_tenderi=None):
+    """Posalji email notifikaciju."""
     posiljalac = os.environ["EMAIL_POSILJALAC"]
     lozinka = os.environ["EMAIL_LOZINKA"]
     primalac = os.environ["EMAIL_PRIMALAC"]
@@ -192,3 +192,6 @@ def pošalji_email(tenderi, novi_tenderi=None):
     except Exception as e:
         print(f"❌ Greška pri slanju emaila: {e}")
         raise
+
+
+pošalji_email = posalji_email
